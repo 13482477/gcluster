@@ -1,131 +1,133 @@
 package app
 
 import (
-	"fmt"
-
-	"net"
-	"os"
-	"poseidon/essential/endpoint"
-	"strings"
-
+	"gcluster/essential/rpc"
+	"gcluster/essential/registry"
 	"sync"
-
-	"strconv"
-
-	"github.com/go-xorm/xorm"
-	"github.com/labstack/echo"
-	"github.com/labstack/echo/middleware"
-	"github.com/pkg/errors"
+	"github.com/urfave/cli"
+	"os"
 	log "github.com/sirupsen/logrus"
-	"google.golang.org/grpc"
-	"gopkg.in/urfave/cli.v2"
-
-	"poseidon/essential/binder"
-
+	_ "github.com/jinzhu/gorm/dialects/mysql"
+	"github.com/hashicorp/consul/api"
+	"github.com/go-kit/kit/sd/consul"
+	"github.com/jinzhu/gorm"
+	"time"
 	"github.com/opentracing/opentracing-go"
-	zipkin "github.com/openzipkin/zipkin-go-opentracing"
-	"github.com/spf13/viper"
+	mcloudHttp "gcluster/essential/http"
+	"net/http"
+	"fmt"
+	"gcluster/essential/manager"
+	"gcluster/essential/config"
+	"gcluster/essential/metric"
+	kitPrometheus "github.com/go-kit/kit/metrics/prometheus"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/robfig/cron"
+	ecsCron "gcluster/essential/cron"
+	"github.com/rifflock/lfshook"
 )
 
-var (
-	appOnce     sync.Once
-	appInstance *PoseidonApp
-)
+var mcloudApp *McloudApp
+var mcloudAppOnce sync.Once
+
+type RunType int
 
 const (
-	kWorkflowTypeSync  = 1
-	kWorkflowTypeAsync = 2
+	RunTypeSync  RunType = 1
+	RunTypeAsync RunType = 2
 )
 
-type Workflow struct {
-	Type    int
-	Process func(app *PoseidonApp) error
+type RunOption struct {
+	Type    RunType
+	Process func(mcApp *McloudApp) error
 }
 
-type Manager interface {
-	Start() error
+type McloudApp struct {
+	Name       string
+	Usage      string
+	Version    string
+	Config     config.McloudConfig
+	Metric     *metric.MCloudMetric
+	Manager    manager.MCloudManager
+	Client     consul.Client
+	Registry   *registry.McloudServiceRegistry
+	Tracer     opentracing.Tracer
+	RpcManager *rpc.MCloudRpcManager
+	HttpServer *mcloudHttp.MCloudHttpServer
+	RunOptions []*RunOption
 }
 
-type PoseidonApp struct {
-	ServiceName     string
-	Name            string
-	Usage           string
-	Version         string
-	Config          interface{}
-	ConfigWatcher   []ConfigWatcher
-	Manager         *Manager
-	ServiceRegistry *endpoint.ServiceRegistry
-	Endpoint        *endpoint.EndPoint
-	Workflow        []Workflow
-}
-
-func GetPoseidonApp() *PoseidonApp {
-	appOnce.Do(func() {
-		appInstance = &PoseidonApp{
-			ConfigWatcher: make([]ConfigWatcher, 0),
-		}
+func GetMcloudApp() *McloudApp {
+	mcloudAppOnce.Do(func() {
+		mcloudApp = &McloudApp{}
 	})
-	return appInstance
+	return mcloudApp
 }
 
-func (ppap *PoseidonApp) Run(workflow ...Workflow) error {
-	ppap.Workflow = workflow
+func printLogo() {
+	log.Infof("                                                                                        ")
+	log.Infof("                                                                                        ")
+	log.Infof("                     &&         &&    &&&   &      &&   &   &  &&&                      ")
+	log.Infof("                    && &     & &&    &      &     &  &  &   &  &  &                     ")
+	log.Infof("                   &&  &   &  &&     &      &     &  &  &   &  &  &                     ")
+	log.Infof("                  &&   & &   &&      &      &     &  &  &   &  &  &                     ")
+	log.Infof("                 &&    &    &&        &&&   &&&&   &&    &&&   &&&                      ")
+	log.Infof("                                                                                        ")
+	log.Infof("                                                                                        ")
+}
+
+func (mcApp *McloudApp) Run(runOptions ...*RunOption) error {
+	mcApp.RunOptions = runOptions
 
 	app := &cli.App{
-		Name:    ppap.Name,
-		Usage:   ppap.Usage,
-		Version: ppap.Version,
+		Name:    mcApp.Name,
+		Usage:   mcApp.Usage,
+		Version: mcApp.Version,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:  "config,c",
-				Value: "config.toml",
+				Name:  "config, c",
+				Value: "config",
 				Usage: "config file path",
-			},
-			&cli.StringSliceFlag{
-				Name:  "etcd,e",
-				Value: cli.NewStringSlice("127.0.0.1:2379"),
-				Usage: "ectd endpoints",
-			},
-			&cli.BoolFlag{
-				Name:  "push_config,pc",
-				Usage: "push config to etcd cluster",
 			},
 		},
 		Action: func(ctx *cli.Context) error {
 
-			// set log level to debug on start
+			filePath := fmt.Sprintf("./%s.log", mcApp.Name)
+			hook := lfshook.NewHook(filePath, nil)
+			log.AddHook(hook)
+
 			log.SetLevel(log.DebugLevel)
 
-			configLoader := ConfigLoader{
-				Name:          ppap.Name,
-				FilePath:      ctx.String("config"),
-				EtcdEndpoint:  ctx.StringSlice("etcd"),
-				Config:        ppap.Config,
-				ConfigWatcher: ppap.defaultConfigWatcher,
-			}
+			printLogo()
 
-			if ctx.Bool("push_config") {
-				return configLoader.PushEtcdConfig(ctx.String("config"))
+			log.Infof("========================================================================================")
+			log.Infof("======================================System start======================================")
+			log.Infof("========================================================================================")
+			log.WithField("SystemName", mcApp.Name).Info()
+			log.WithField("Version", mcApp.Version).Info()
+
+			configLoader := &config.MCloudConfigLoader{
+				Name:     ctx.String("config"),
+				FilePath: ".",
+				Config:   mcApp.Config,
 			}
 
 			if err := configLoader.Load(); err != nil {
-				log.Panic(err)
-				return err
+				log.Panicf("load config file failed, error=%v", err)
 			}
 
 			wg := sync.WaitGroup{}
 			wg.Add(1)
 
-			for _, wf := range ppap.Workflow {
-				if wf.Type == kWorkflowTypeSync {
-					if err := wf.Process(ppap); err != nil {
+			for _, runOption := range mcApp.RunOptions {
+				if runOption.Type == RunTypeSync {
+					if err := runOption.Process(mcApp); err != nil {
 						log.Panic(err)
 					}
 				} else {
-					localWorkflow := wf
+					localRunOption := runOption
 					wg.Add(1)
 					go func() {
-						if err := localWorkflow.Process(ppap); err != nil {
+						if err := localRunOption.Process(mcApp); err != nil {
 							log.Panic(err)
 						}
 						wg.Done()
@@ -136,8 +138,6 @@ func (ppap *PoseidonApp) Run(workflow ...Workflow) error {
 			wg.Done()
 			wg.Wait()
 
-			log.Info("RunPoseidon All Done")
-
 			return nil
 		},
 	}
@@ -145,294 +145,186 @@ func (ppap *PoseidonApp) Run(workflow ...Workflow) error {
 	return app.Run(os.Args)
 }
 
-func (ppap *PoseidonApp) startServiceRegistry() error {
-	config := endpoint.ServiceRegistryOption{}
-	if !viper.IsSet("ServiceRegistry") {
-		log.Errorf("PoseidonApp startServiceRegistry ServiceRegistry not set")
-		return errors.Errorf("PoseidonApp startServiceRegistry ServiceRegistry not set")
-	}
-
-	if err := viper.UnmarshalKey("ServiceRegistry", &config); err != nil {
-		log.Errorf("unable to get serviceRegistryConfig")
-		return errors.Wrapf(err, "startServiceRegistry unmarshal failed")
-	}
-
-	serverRegistry, err := endpoint.StartServiceRegistry(config)
-	if err != nil {
-		return err
-	}
-
-	ppap.ServiceRegistry = serverRegistry
-	return nil
-}
-
-func (ppap *PoseidonApp) AddConfigWatcher(watcher ConfigWatcher) {
-	ppap.ConfigWatcher = append(ppap.ConfigWatcher, watcher)
-}
-
-func (ppap *PoseidonApp) defaultConfigWatcher(config interface{}) error {
-	for _, watcher := range ppap.ConfigWatcher {
-		watcher(config)
-	}
-	return nil
-}
-
-func WithLogger() Workflow {
-	setLogLevel := func(level string) error {
-		l, err := log.ParseLevel(viper.GetString("LogLevel"))
-		if err != nil {
-			return err
-		}
-		log.SetLevel(l)
-		return nil
-	}
-
-	return Workflow{
-		Type: kWorkflowTypeSync,
-		Process: func(ppap *PoseidonApp) error {
-
-			ppap.AddConfigWatcher(func(_ interface{}) error {
-				return setLogLevel(viper.GetString("LogLevel"))
-			})
-
-			return setLogLevel(viper.GetString("LogLevel"))
-		},
-	}
-}
-
-func WithLoggerFormatter(formatter log.Formatter) Workflow {
-	return Workflow{
-		Type: kWorkflowTypeSync,
-		Process: func(ppap *PoseidonApp) error {
-			if formatter != nil {
-				log.SetFormatter(formatter)
+func WithLoggerOption() *RunOption {
+	return &RunOption{
+		Type: RunTypeSync,
+		Process: func(app *McloudApp) error {
+			logConfig := app.Config.(config.LogConfiguration)
+			level, err := log.ParseLevel(logConfig.GetLogLevelConfig())
+			if err != nil {
+				log.Panicf("Parse log level failed, error=%v", err)
 			}
+			log.SetLevel(level)
+			if log.DebugLevel == level {
+				//log.SetReportCaller(true)
+			}
+
 			return nil
 		},
 	}
 }
 
-func WithServiceRegistery() Workflow {
-	return Workflow{
-		Type: kWorkflowTypeSync,
-		Process: func(ppap *PoseidonApp) error {
-			if ppap.ServiceRegistry == nil {
-				return ppap.startServiceRegistry()
+func WithMetricOption() *RunOption {
+	return &RunOption{
+		Type: RunTypeSync,
+		Process: func(app *McloudApp) error {
+
+			fieldKeys := []string{"method"}
+
+			app.Metric = &metric.MCloudMetric{
+				RequestCount: kitPrometheus.NewCounterFrom(prometheus.CounterOpts{
+					Namespace: "mcloud",
+					Subsystem: app.Name,
+					Name:      "request_count",
+					Help:      "Number of requests received.",
+				}, fieldKeys),
+
+				RequestLatency: kitPrometheus.NewSummaryFrom(prometheus.SummaryOpts{
+					Namespace: "mcloud",
+					Subsystem: app.Name,
+					Name:      "request_latency_microseconds",
+					Help:      "Total duration of requests in microseconds.",
+				}, fieldKeys),
 			}
+
+			log.Printf("Start MCloud metric server successfully!")
 			return nil
 		},
 	}
 }
 
-func WithRegisterService(handler func(ppap *PoseidonApp) error) Workflow {
-	return Workflow{
-		Type: kWorkflowTypeSync,
-		Process: func(ppap *PoseidonApp) error {
-			if ppap.ServiceRegistry == nil {
-				err := ppap.startServiceRegistry()
-				if err != nil {
-					return err
-				}
-			}
-			ppap.Endpoint = endpoint.NewEndPoint(ppap.ServiceRegistry)
-			return handler(ppap)
-		},
-	}
-}
+func WithRegistryOption() *RunOption {
+	return &RunOption{
+		Type: RunTypeSync,
+		Process: func(app *McloudApp) error {
 
-func WithPrometheusMetrics() Workflow {
-	return Workflow{
-		Type: kWorkflowTypeSync,
-		Process: func(ppap *PoseidonApp) error {
-			if ppap.ServiceRegistry == nil {
-				err := ppap.startServiceRegistry()
-				if err != nil {
-					return err
-				}
-			}
-
-			var port = 0
-			if TCPServerConfig, ok := ppap.Config.(TCPServerConfig); ok {
-				port = TCPServerConfig.GetTCPServerConfig().PrometheusPort
-			}
-			if err := ppap.ServiceRegistry.RunPrometheusMatrix(port); err != nil {
-				return err
-			}
-			return nil
-		},
-	}
-}
-
-func WithManager(handler func(dbMap map[string]*xorm.Engine, poseidonApp *PoseidonApp) Manager) Workflow {
-	return Workflow{
-		Type: kWorkflowTypeSync,
-		Process: func(poseidonApp *PoseidonApp) error {
-			config, ok := poseidonApp.Config.(MysqlServerConfig)
+			cfg, ok := app.Config.(config.ServiceRegistryConfiguration)
 			if !ok {
-				log.Error("mysql server config is not MysqlServerConfig")
-				return errors.Errorf("mysql server config is not MysqlServerConfig")
+				log.Panic("ServiceRegistryConfiguration is not be configured.")
 			}
-			mysqlConfigMap := config.GetMysqlConfig()
 
-			loggerLevelConfig := viper.GetString("LogLevel")
-			dbMap := make(map[string]*xorm.Engine)
-			for dbName, dbStr := range mysqlConfigMap.ConnectionString {
-				dbEngine, err := xorm.NewEngine("mysql", dbStr)
-				if err != nil {
+			consulConfig := api.DefaultConfig()
+			consulConfig.Address = cfg.GetServiceRegistryConfig().Address
+			consulClient, err := api.NewClient(consulConfig)
+			if err != nil {
+				log.Panic("Failed to init consul client.")
+			}
+
+			mcloudServiceRegistry := registry.McloudServiceRegistry{
+				Client:     consul.NewClient(consulClient),
+				ServerName: app.Name,
+				Config:     app.Config,
+			}
+
+			app.Client = mcloudServiceRegistry.Client
+
+			mcloudServiceRegistry.Register()
+			log.Printf("Start MCloud server mcloudServiceRegistry successfully!")
+			return nil
+		},
+	}
+}
+
+func WithOpenTracingOption() *RunOption {
+	return &RunOption{
+		Type: RunTypeSync,
+		Process: func(app *McloudApp) error {
+			tracer := opentracing.GlobalTracer()
+			app.Tracer = tracer
+			log.Printf("Start MCloud trace server successfully!")
+			return nil
+		},
+	}
+}
+
+func WithManagerOption(handler func(db *gorm.DB) (manager.MCloudManager, error)) *RunOption {
+	return &RunOption{
+		Type: RunTypeSync,
+		Process: func(app *McloudApp) error {
+			dbConfig := app.Config.(config.DatabaseConfiguration).GetDataBaseConfiguration()
+			db, err := gorm.Open("mysql", dbConfig.Address)
+			if err != nil {
+				log.Panicf("Fatal error mysql connection failed: %v", err)
+			}
+			db.SingularTable(true)
+			db.LogMode(dbConfig.LogMode)
+			db.DB().SetMaxIdleConns(dbConfig.MaxIdle)
+			db.DB().SetMaxOpenConns(dbConfig.MaxConns)
+			db.DB().SetConnMaxLifetime(time.Duration(dbConfig.MaxLifetime) * time.Second)
+
+			if mCloudManager, err := handler(db); err != nil {
+				return err
+			} else {
+				app.Manager = mCloudManager
+				if err := mCloudManager.StartMcloudManager(); err != nil {
+					log.Panicf("Start MCloud manager failed, error=%v", err)
+				} else {
+					log.Infof("Start MCloud manager successfully!")
+				}
+				return nil
+			}
+		},
+	}
+}
+
+func WithRpcOption(handler func() []*rpc.MCloudRpcOption) *RunOption {
+	return &RunOption{
+		Type: RunTypeSync,
+		Process: func(app *McloudApp) error {
+			rpcManager := rpc.GetMCloudRpcManager(app.Client, app.Tracer)
+			app.RpcManager = rpcManager
+
+			options := handler()
+
+			for _, v := range options {
+				rpcManager.Subscript(v)
+			}
+
+			log.Printf("Start MCloud rcp server successfully!")
+			return nil
+		},
+	}
+}
+
+func WithHttpEndpointOption(handler func() []*mcloudHttp.MCloudHttpEndpointOption) *RunOption {
+	return &RunOption{
+		Type: RunTypeAsync,
+		Process: func(app *McloudApp) error {
+			app.HttpServer = mcloudHttp.GetHttpServer()
+			app.HttpServer.Tracer = app.Tracer
+			app.HttpServer.Metric = app.Metric
+
+			opts := handler()
+
+			for _, v := range opts {
+				app.HttpServer.Register(app.Manager, v)
+			}
+
+			port := app.Config.(config.ServerConfiguration).GetServerConfig().Port
+
+			log.Printf("Start MCloud http server, successfully, work on port:%d", port)
+			log.WithError(http.ListenAndServe(fmt.Sprintf(":%d", port), app.HttpServer.Router))
+			return nil
+		},
+	}
+}
+
+func WithCronOption(handler func(mgr manager.MCloudManager) []*ecsCron.MCloudCronOption) *RunOption {
+	return &RunOption{
+		Type: RunTypeAsync,
+		Process: func(app *McloudApp) error {
+
+			c := cron.New()
+			options := handler(app.Manager)
+
+			for _, option := range options {
+				if err := c.AddFunc(option.Spec, option.Handler(app.Manager)); err != nil {
 					return err
-				}
-
-				if strings.ToUpper(loggerLevelConfig) == "DEBUG" {
-					dbEngine.ShowSQL(true)
-				}
-				dbMap[dbName] = dbEngine
-			}
-			manager := handler(dbMap, poseidonApp)
-			if manager == nil {
-				return fmt.Errorf("build manager fail")
-			}
-			err := manager.Start()
-			if err != nil {
-				return err
-			}
-			poseidonApp.Manager = &manager
-			return nil
-		},
-	}
-}
-
-func WithHttpServer(handler func(e *echo.Echo, ppap *PoseidonApp) error) Workflow {
-	return Workflow{
-		Type: kWorkflowTypeAsync,
-		Process: func(ppap *PoseidonApp) error {
-			TCPServerConfig, ok := ppap.Config.(TCPServerConfig)
-			if !ok {
-				log.Error("config is not TCPServerConfig")
-				return errors.Errorf("config is not TCPServerConfig")
-			}
-
-			e := echo.New()
-			e.Binder = &binder.PbRequestBinder{}
-
-			e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-				AllowOrigins: []string{"*"},
-				AllowMethods: []string{echo.GET, echo.POST},
-			}))
-
-			if err := handler(e, ppap); err != nil {
-				return err
-			}
-
-			config := TCPServerConfig.GetTCPServerConfig()
-			return e.Start(config.Host + ":" + strconv.Itoa(config.HttpPort))
-		},
-	}
-}
-
-func WithGrpcServer(handler func(server *grpc.Server, ppap *PoseidonApp) error) Workflow {
-	return Workflow{
-		Type: kWorkflowTypeAsync,
-		Process: func(ppap *PoseidonApp) error {
-			if ppap.ServiceRegistry == nil {
-				err := ppap.startServiceRegistry()
-				if err != nil {
-					return err
+				} else {
+					log.Infof("Start MCloud crontab successful, name=%s, spec=%s, usage=%s", option.Name, option.Spec, option.Usage)
 				}
 			}
-
-			serverConfig, ok := ppap.Config.(TCPServerConfig)
-			if !ok {
-				log.Error("config is not TCPServerConfig")
-				return errors.Errorf("config is not TCPServerConfig")
-			}
-			config := serverConfig.GetTCPServerConfig()
-			address := fmt.Sprintf("%s:%d", config.Host, config.GrpcPort)
-			listener, err := net.Listen("tcp", address)
-			if err != nil {
-				return err
-			}
-			server := ppap.ServiceRegistry.NewServer()
-			if err := handler(server, ppap); err != nil {
-				return err
-			}
-			return ppap.ServiceRegistry.RegisterServerAndRun(ppap.Name, server, listener)
-		},
-	}
-}
-
-func WithZipkinTracer() Workflow {
-
-	getZipkinCreator := func(serviceName string) ConfigWatcher {
-		return func(config interface{}) error {
-			zipkinConfig := new(ZipkinConfig)
-			if !viper.IsSet("ZipkinConfig") {
-				log.Errorf("getZipkinCreator ZipkinConfig not set")
-				return errors.Errorf("getZipkinCreator ZipkinConfig not set")
-			}
-
-			if err := viper.UnmarshalKey("ZipkinConfig", zipkinConfig); err != nil {
-				log.Errorf("unable to get zipkin config")
-				return errors.Wrapf(err, "getZipkinCreator unmarshal failed")
-			}
-
-			collector, err := zipkin.NewHTTPCollector(zipkinConfig.Url)
-			if err != nil {
-				log.Errorf("unable to create Zipkin HTTP collector: %+v\n", err)
-				return err
-			}
-
-			recorder := zipkin.NewRecorder(collector, zipkinConfig.Debug, "0.0.0.0:0", serviceName)
-
-			var sampler zipkin.Sampler
-			switch zipkinConfig.Sampler {
-			case "Mod":
-				sampler = zipkin.ModuloSampler(uint64(zipkinConfig.Mod))
-			case "Always":
-				sampler = zipkin.NewBoundarySampler(1, 0)
-			case "Never":
-				sampler = zipkin.NewBoundarySampler(0, 0)
-			default:
-				sampler = zipkin.NewBoundarySampler(0, 0)
-			}
-
-			tracer, err := zipkin.NewTracer(
-				recorder,
-				zipkin.WithSampler(sampler),
-				zipkin.ClientServerSameSpan(zipkinConfig.ClientServerSameSample),
-				zipkin.TraceID128Bit(true),
-				zipkin.DebugMode(zipkinConfig.Debug),
-			)
-			if err != nil {
-				log.Errorf("unable to create Zipkin tracer: %+v\n", err)
-				return err
-			}
-
-			opentracing.InitGlobalTracer(tracer)
-
-			return nil
-		}
-	}
-
-	return Workflow{
-		Type: kWorkflowTypeSync,
-		Process: func(ppap *PoseidonApp) error {
-			if err := getZipkinCreator(ppap.Name)(ppap.Config); err != nil {
-				return err
-			}
-
-			ppap.AddConfigWatcher(getZipkinCreator(ppap.Name))
-			return nil
-		},
-	}
-}
-
-func WithCrontab(handler func(ppap *PoseidonApp) error) Workflow {
-	return Workflow{
-		Type: kWorkflowTypeSync,
-		Process: func(ppap *PoseidonApp) error {
-			if err := handler(ppap); err != nil {
-				return err
-			}
+			c.Start()
 			return nil
 		},
 	}

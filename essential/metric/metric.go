@@ -12,7 +12,7 @@ type GClusterMetric struct {
 	RequestLatency metrics.Histogram
 }
 
-func MCloudMetricServer(method string, metric *GClusterMetric) endpoint.Middleware {
+func GClusterMetricServer(method string, metric *GClusterMetric) endpoint.Middleware {
 	return func(next endpoint.Endpoint) endpoint.Endpoint {
 		return func(ctx context.Context, request interface{}) (interface{}, error) {
 			if metric != nil {

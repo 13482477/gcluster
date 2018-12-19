@@ -50,7 +50,7 @@ func (httpServer *GClusterHttpServer) Register(manager manager.GClusterManager, 
 	respEncoder := MakeResponseEncoder(endpointOption)
 
 	if httpServer.Metric != nil {
-		endpoint = metric.MCloudMetricServer(endpointOption.Method, httpServer.Metric)(endpoint)
+		endpoint = metric.GClusterMetricServer(endpointOption.Method, httpServer.Metric)(endpoint)
 	}
 
 	serverOptions := make([]transport.ServerOption, 0)

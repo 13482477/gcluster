@@ -1,40 +1,40 @@
 package rpc
 
 import (
-	"github.com/go-kit/kit/sd"
-	"github.com/go-kit/kit/endpoint"
 	"sync"
 	"io"
 	"strings"
 	"net/url"
-	"github.com/go-kit/kit/sd/lb"
-	transportHttp "github.com/go-kit/kit/transport/http"
-	consulsd "github.com/go-kit/kit/sd/consul"
-	opentracinggo "github.com/opentracing/opentracing-go"
 	"time"
-	"github.com/go-kit/kit/tracing/opentracing"
 	"fmt"
 	"context"
 	"errors"
 	"net/http"
-	applog "gcluster/essential/log"
+	"github.com/go-kit/kit/sd"
+	"github.com/go-kit/kit/endpoint"
+	"github.com/go-kit/kit/sd/lb"
+	"github.com/go-kit/kit/sd/consul"
+	"github.com/opentracing/opentracing-go"
+	transportHttp "github.com/go-kit/kit/transport/http"
+	goKitOpenTracing "github.com/go-kit/kit/tracing/opentracing"
+	"gcluster/essential/log"
 )
 
-var rpcManager *MCloudRpcManager
+var rpcManager *GClusterRpcManager
 var rpcManagerOnce sync.Once
 
-type MCloudRpcManager struct {
-	EndpointMap map[string]map[string]*MCloudRpcOption
+type GClusterRpcManager struct {
+	EndpointMap map[string]map[string]*GClusterRpcOption
 	InstanceMap map[string]sd.Instancer
-	Client      consulsd.Client
-	Tracer      opentracinggo.Tracer
+	Client      consul.Client
+	Tracer      opentracing.Tracer
 	Tags        []string
 	PassingOnly bool
-	MaxAttempts int           // per request, before giving up
-	MaxTime     time.Duration // wallclock time, before giving up
+	MaxAttempts int
+	MaxTime     time.Duration
 }
 
-type MCloudRpcOption struct {
+type GClusterRpcOption struct {
 	ServiceName    string
 	Path           string
 	HttpMethod     string
@@ -45,10 +45,10 @@ type MCloudRpcOption struct {
 	Endpoint       endpoint.Endpoint
 }
 
-func GetMCloudRpcManager(client consulsd.Client, tracer opentracinggo.Tracer) *MCloudRpcManager {
+func GetGClusterRpcManager(client consul.Client, tracer opentracing.Tracer) *GClusterRpcManager {
 	rpcManagerOnce.Do(func() {
-		rpcManager = &MCloudRpcManager{
-			EndpointMap: make(map[string]map[string]*MCloudRpcOption),
+		rpcManager = &GClusterRpcManager{
+			EndpointMap: make(map[string]map[string]*GClusterRpcOption),
 			InstanceMap: make(map[string]sd.Instancer),
 			Client:      client,
 			Tracer:      tracer,
@@ -61,30 +61,30 @@ func GetMCloudRpcManager(client consulsd.Client, tracer opentracinggo.Tracer) *M
 	return rpcManager
 }
 
-func GetRpcManager() *MCloudRpcManager {
+func GetRpcManager() *GClusterRpcManager {
 	return rpcManager
 }
 
-func (manager *MCloudRpcManager) Subscript(rpcService *MCloudRpcOption) {
+func (manager *GClusterRpcManager) Subscript(rpcService *GClusterRpcOption) {
 	manager.MakeRpcEndpoint(rpcService)
 
-	var subEndpointMap map[string]*MCloudRpcOption
+	var subEndpointMap map[string]*GClusterRpcOption
 	if v, ok := manager.EndpointMap[rpcService.ServiceName]; ok {
 		subEndpointMap = v
 	} else {
-		subEndpointMap = make(map[string]*MCloudRpcOption)
+		subEndpointMap = make(map[string]*GClusterRpcOption)
 		manager.EndpointMap[rpcService.ServiceName] = subEndpointMap
 	}
 
 	subEndpointMap[rpcService.Path] = rpcService
 }
 
-func (manager *MCloudRpcManager) MakeRpcEndpoint(rpcOption *MCloudRpcOption) {
+func (manager *GClusterRpcManager) MakeRpcEndpoint(rpcOption *GClusterRpcOption) {
 	var instance sd.Instancer
 	if v, ok := manager.InstanceMap[rpcOption.ServiceName]; ok {
 		instance = v
 	} else {
-		instance = consulsd.NewInstancer(manager.Client, applog.GetConsulLogger(), rpcOption.ServiceName, manager.Tags, manager.PassingOnly)
+		instance = consul.NewInstancer(manager.Client, applog.GetConsulLogger(), rpcOption.ServiceName, manager.Tags, manager.PassingOnly)
 		manager.InstanceMap[rpcOption.ServiceName] = instance
 	}
 
@@ -98,19 +98,19 @@ func (manager *MCloudRpcManager) MakeRpcEndpoint(rpcOption *MCloudRpcOption) {
 		}
 		tgt.Path = rpcOption.Path
 
-		return transportHttp.NewClient(rpcOption.HttpMethod, tgt, EncodeJSONRequest, MakeDecodeJsonResponse(rpcOption.CreateResp()), transportHttp.ClientBefore(opentracing.ContextToHTTP(manager.Tracer, applog.GetOpenTracingLogger()))).Endpoint(), nil, nil
+		return transportHttp.NewClient(rpcOption.HttpMethod, tgt, EncodeJSONRequest, MakeDecodeJsonResponse(rpcOption.CreateResp()), transportHttp.ClientBefore(goKitOpenTracing.ContextToHTTP(manager.Tracer, applog.GetOpenTracingLogger()))).Endpoint(), nil, nil
 	}, applog.GetEndpointLogger())
 
 	balancer := lb.NewRoundRobin(defaultEndpoint)
 	ep := lb.Retry(manager.MaxAttempts, manager.MaxTime, balancer)
 
 	if manager.Tracer != nil {
-		ep = opentracing.TraceClient(manager.Tracer, fmt.Sprintf("%s.%s", rpcOption.ServiceName, rpcOption.Path))(ep)
+		ep = goKitOpenTracing.TraceClient(manager.Tracer, fmt.Sprintf("%s.%s", rpcOption.ServiceName, rpcOption.Path))(ep)
 	}
 	rpcOption.Endpoint = ep
 }
 
-func (manager *MCloudRpcManager) Call(ctx context.Context, server string, path string, req interface{}) (interface{}, error) {
+func (manager *GClusterRpcManager) Call(ctx context.Context, server string, path string, req interface{}) (interface{}, error) {
 	if subMap, ok := manager.EndpointMap[server]; ok {
 		if rpcService, ok := subMap[path]; ok {
 			if resp, err := rpcService.Endpoint(ctx, req); err != nil {

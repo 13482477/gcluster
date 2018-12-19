@@ -1,13 +1,13 @@
 package cron
 
-import "mcloud/public.v2/manager"
+import "gcluster/essential/manager"
 
-type MCloudCronHandler func(manager manager.MCloudManager) func()
+type GClusterCronHandler func(manager manager.GClusterManager) func()
 
 
-type MCloudCronOption struct {
+type GClusterCronOption struct {
 	Name    string
 	Usage   string
 	Spec    string
-	Handler MCloudCronHandler
+	Handler GClusterCronHandler
 }

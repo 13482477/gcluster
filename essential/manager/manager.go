@@ -1,5 +1,5 @@
 package manager
 
-type MCloudManager interface {
-	StartMcloudManager() error
+type GClusterManager interface {
+	StartGClusterManager() error
 }

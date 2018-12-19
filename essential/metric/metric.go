@@ -1,18 +1,18 @@
 package metric
 
 import (
-	"github.com/go-kit/kit/metrics"
-	"github.com/go-kit/kit/endpoint"
 	"context"
 	"time"
+	"github.com/go-kit/kit/metrics"
+	"github.com/go-kit/kit/endpoint"
 )
 
-type MCloudMetric struct {
+type GClusterMetric struct {
 	RequestCount   metrics.Counter
 	RequestLatency metrics.Histogram
 }
 
-func MCloudMetricServer(method string, metric *MCloudMetric) endpoint.Middleware {
+func MCloudMetricServer(method string, metric *GClusterMetric) endpoint.Middleware {
 	return func(next endpoint.Endpoint) endpoint.Endpoint {
 		return func(ctx context.Context, request interface{}) (interface{}, error) {
 			if metric != nil {

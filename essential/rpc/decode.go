@@ -1,11 +1,11 @@
 package rpc
 
 import (
-	"encoding/json"
+	"fmt"
 	"context"
 	"net/http"
+	"encoding/json"
 	"github.com/kataras/iris/core/errors"
-	"fmt"
 )
 
 func MakeDecodeJsonResponse(resp interface{}) func(_ context.Context, httpResp *http.Response) (interface{}, error) {

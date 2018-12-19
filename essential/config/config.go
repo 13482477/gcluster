@@ -1,12 +1,12 @@
 package config
 
 import (
+	"encoding/json"
 	"github.com/spf13/viper"
 	log "github.com/sirupsen/logrus"
-	"encoding/json"
 )
 
-type McloudConfig interface {
+type GClusterConfig interface {
 	ConfigString() string
 }
 
@@ -51,28 +51,28 @@ type ServerConfiguration interface {
 	GetServerConfig() *ServerConfig
 }
 
-type MCloudConfigLoader struct {
+type GClusterConfigLoader struct {
 	Name     string
 	FilePath string
-	Config   McloudConfig
+	Config   GClusterConfig
 }
 
-func (loader *MCloudConfigLoader) Load() error {
+func (loader *GClusterConfigLoader) Load() error {
 	viper.SetConfigName("config")
 	viper.AddConfigPath(".")
 
 	if err := viper.ReadInConfig(); err != nil {
-		log.Errorf("MCloudConfigLoader ReadConfig failed, err: %v", err)
+		log.Errorf("GClusterConfigLoader ReadConfig failed, err: %v", err)
 		return err
 	}
 
 	if err := viper.Unmarshal(loader.Config); err != nil {
-		log.Errorf("MCloudConfigLoader ReadConfig failed %v", err)
+		log.Errorf("GClusterConfigLoader ReadConfig failed %v", err)
 		return err
 	}
 
 	configData, _ := json.MarshalIndent(viper.AllSettings(), "", "")
-	log.Printf("MCloudConfigLoader ReadRemoteConfig success, %s", configData)
+	log.Printf("GClusterConfigLoader ReadRemoteConfig success, %s", configData)
 
 	return nil
 }

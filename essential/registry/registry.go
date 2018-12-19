@@ -1,21 +1,21 @@
 package registry
 
 import (
+	"fmt"
+	"net"
 	"github.com/go-kit/kit/sd/consul"
 	"github.com/hashicorp/consul/api"
 	"gcluster/essential/config"
-	"fmt"
-	applog "gcluster/essential/log"
-	"net"
+	"gcluster/essential/log"
 )
 
-type McloudServiceRegistry struct {
+type GClusterServiceRegistry struct {
 	ServerName string
-	Config     config.McloudConfig
+	Config     config.GClusterConfig
 	Client     consul.Client
 }
 
-func (registry *McloudServiceRegistry) Register() {
+func (registry *GClusterServiceRegistry) Register() {
 	name := registry.ServerName
 	localAddress := registry.Config.(config.ServerConfiguration).GetServerConfig().Address
 	if localAddress == "" {

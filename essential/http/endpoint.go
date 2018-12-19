@@ -8,7 +8,7 @@ import (
 	"context"
 )
 
-func MakeEndpoint(manager manager.MCloudManager, method string) endpoint.Endpoint {
+func MakeEndpoint(manager manager.GClusterManager, method string) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (interface{}, error) {
 		log.Debugf("manager method invoke, manager=%s, method=%s", reflect.TypeOf(manager), method)
 

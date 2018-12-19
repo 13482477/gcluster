@@ -1,16 +1,16 @@
 package http
 
 import (
-	"encoding/json"
-	transport "github.com/go-kit/kit/transport/http"
+	"fmt"
 	"context"
 	"net/http"
+	"encoding/json"
 	"github.com/kataras/iris/core/errors"
-	"fmt"
+	transport "github.com/go-kit/kit/transport/http"
 	log "github.com/sirupsen/logrus"
 )
 
-func MakeRequestDecoder(option *MCloudHttpEndpointOption) transport.DecodeRequestFunc {
+func MakeRequestDecoder(option *GClusterHttpEndpointOption) transport.DecodeRequestFunc {
 	if option.ReqDecoder != nil {
 		return option.ReqDecoder
 	} else {

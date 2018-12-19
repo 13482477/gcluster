@@ -7,7 +7,7 @@ import (
 	transport "github.com/go-kit/kit/transport/http"
 )
 
-func MakeResponseEncoder(option *MCloudHttpEndpointOption) transport.EncodeResponseFunc {
+func MakeResponseEncoder(option *GClusterHttpEndpointOption) transport.EncodeResponseFunc {
 	if option.RespEncoder != nil {
 		return option.RespEncoder
 	} else {

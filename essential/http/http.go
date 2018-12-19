@@ -5,23 +5,23 @@ import (
 	"sync"
 	transport "github.com/go-kit/kit/transport/http"
 	"gcluster/essential/manager"
-	"github.com/go-kit/kit/tracing/opentracing"
-	opentracinggo "github.com/opentracing/opentracing-go"
+	goKitOpenTracing "github.com/go-kit/kit/tracing/opentracing"
+	"github.com/opentracing/opentracing-go"
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/log"
 	"gcluster/essential/log"
 	"gcluster/essential/metric"
 )
 
-var httpServer *MCloudHttpServer
+var httpServer *GClusterHttpServer
 var httpServerOnce sync.Once
 
-type MCloudHttpServer struct {
+type GClusterHttpServer struct {
 	Router *mux.Router
-	Tracer opentracinggo.Tracer
-	Metric *metric.MCloudMetric
+	Tracer opentracing.Tracer
+	Metric *metric.GClusterMetric
 }
 
-type MCloudHttpEndpointOption struct {
+type GClusterHttpEndpointOption struct {
 	Path        string
 	HttpMethod  string
 	Method      string
@@ -31,16 +31,16 @@ type MCloudHttpEndpointOption struct {
 	RespEncoder transport.EncodeResponseFunc
 }
 
-func GetHttpServer() *MCloudHttpServer {
+func GetHttpServer() *GClusterHttpServer {
 	httpServerOnce.Do(func() {
-		httpServer = &MCloudHttpServer{
+		httpServer = &GClusterHttpServer{
 			Router: mux.NewRouter(),
 		}
 	})
 	return httpServer
 }
 
-func (httpServer *MCloudHttpServer) Register(manager manager.MCloudManager, endpointOption *MCloudHttpEndpointOption) *MCloudHttpServer {
+func (httpServer *GClusterHttpServer) Register(manager manager.GClusterManager, endpointOption *GClusterHttpEndpointOption) *GClusterHttpServer {
 	if endpointOption.ReqDecoder == nil && endpointOption.CreateReq == nil {
 		log.Panic("You must filling the ReqDecoder or CreateReq at least one.")
 	}
@@ -57,8 +57,8 @@ func (httpServer *MCloudHttpServer) Register(manager manager.MCloudManager, endp
 	serverOptions = append(serverOptions, transport.ServerErrorEncoder(ErrorEncoder))
 
 	if httpServer.Tracer != nil {
-		endpoint = opentracing.TraceServer(httpServer.Tracer, endpointOption.Method)(endpoint)
-		serverOptions = append(serverOptions, transport.ServerBefore(opentracing.HTTPToContext(httpServer.Tracer, endpointOption.Path, applog.GetOpenTracingLogger())))
+		endpoint = goKitOpenTracing.TraceServer(httpServer.Tracer, endpointOption.Method)(endpoint)
+		serverOptions = append(serverOptions, transport.ServerBefore(goKitOpenTracing.HTTPToContext(httpServer.Tracer, endpointOption.Path, applog.GetOpenTracingLogger())))
 	}
 
 	httpServer.Router.Handle(endpointOption.Path, transport.NewServer(

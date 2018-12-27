@@ -1,0 +1,20 @@
+{
+  "logLevel": "info",
+  "serviceRegistryConfig": {
+    "address": "http://127.0.0.1:8500"
+  },
+  "openTracingConfig": {
+    "address": "106.14.14.223:5775"
+  },
+  "databaseConfig": {
+    "address": "",
+    "logMode": true,
+    "maxIdle": 10,
+    "maxConns": 100,
+    "maxLifetime": 3600
+  },
+  "serverConfig": {
+    "address": "",
+    "port": 9000
+  }
+}

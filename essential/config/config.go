@@ -39,7 +39,7 @@ type DatabaseConfig struct {
 }
 
 type DatabaseConfiguration interface {
-	GetDataBaseConfiguration() *DatabaseConfig
+	GetDataBaseConfig() *DatabaseConfig
 }
 
 type ServerConfig struct {

@@ -241,16 +241,22 @@ func WithManagerOption(handler func(db *gorm.DB) (manager.GClusterManager, error
 	return &RunOption{
 		Type: RunTypeSync,
 		Process: func(app *GClusterApp) error {
-			dbConfig := app.Config.(config.DatabaseConfiguration).GetDataBaseConfiguration()
-			db, err := gorm.Open("mysql", dbConfig.Address)
-			if err != nil {
-				log.Panicf("Fatal error mysql connection failed: %v", err)
+			dbConfig := app.Config.(config.DatabaseConfiguration).GetDataBaseConfig()
+
+			var db *gorm.DB
+
+			if dbConfig.Address != "" {
+				database, err := gorm.Open("mysql", dbConfig.Address)
+				if err != nil {
+					log.Panicf("Fatal error mysql connection failed: %v", err)
+				}
+				db = database
+				db.SingularTable(true)
+				db.LogMode(dbConfig.LogMode)
+				db.DB().SetMaxIdleConns(dbConfig.MaxIdle)
+				db.DB().SetMaxOpenConns(dbConfig.MaxConns)
+				db.DB().SetConnMaxLifetime(time.Duration(dbConfig.MaxLifetime) * time.Second)
 			}
-			db.SingularTable(true)
-			db.LogMode(dbConfig.LogMode)
-			db.DB().SetMaxIdleConns(dbConfig.MaxIdle)
-			db.DB().SetMaxOpenConns(dbConfig.MaxConns)
-			db.DB().SetConnMaxLifetime(time.Duration(dbConfig.MaxLifetime) * time.Second)
 
 			if gClusterManager, err := handler(db); err != nil {
 				return err

@@ -34,7 +34,7 @@ func EncodeJSONResponseWithBaseResponse(_ context.Context, w http.ResponseWriter
 	}
 
 	resp := &BaseResponse{
-		Code:    0,
+		Code:    200,
 		Message: "success",
 		Data:    data,
 	}

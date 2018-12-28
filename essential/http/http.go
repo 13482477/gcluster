@@ -10,10 +10,11 @@ import (
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/log"
 	"gcluster/essential/log"
 	"gcluster/essential/metric"
+	"net/http"
 )
 
-var httpServer *GClusterHttpServer
-var httpServerOnce sync.Once
+var gHttpServer *GClusterHttpServer
+var gHttpServerOnce sync.Once
 
 type GClusterHttpServer struct {
 	Router *mux.Router
@@ -32,12 +33,12 @@ type GClusterHttpEndpointOption struct {
 }
 
 func GetHttpServer() *GClusterHttpServer {
-	httpServerOnce.Do(func() {
-		httpServer = &GClusterHttpServer{
+	gHttpServerOnce.Do(func() {
+		gHttpServer = &GClusterHttpServer{
 			Router: mux.NewRouter(),
 		}
 	})
-	return httpServer
+	return gHttpServer
 }
 
 func (httpServer *GClusterHttpServer) Register(manager manager.GClusterManager, endpointOption *GClusterHttpEndpointOption) *GClusterHttpServer {
@@ -60,13 +61,26 @@ func (httpServer *GClusterHttpServer) Register(manager manager.GClusterManager, 
 		endpoint = goKitOpenTracing.TraceServer(httpServer.Tracer, endpointOption.Method)(endpoint)
 		serverOptions = append(serverOptions, transport.ServerBefore(goKitOpenTracing.HTTPToContext(httpServer.Tracer, endpointOption.Path, applog.GetOpenTracingLogger())))
 	}
-
-	httpServer.Router.Handle(endpointOption.Path, transport.NewServer(
+	httpServer.Router.Handle(endpointOption.Path, accessControl(transport.NewServer(
 		endpoint,
 		reqDecoder,
 		respEncoder,
 		serverOptions...
-	)).Methods(endpointOption.HttpMethod)
+	))).Methods(endpointOption.HttpMethod, http.MethodOptions)
 
 	return httpServer
+}
+
+func accessControl(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "*")
+
+		if r.Method == "OPTIONS" {
+			return
+		}
+
+		h.ServeHTTP(w, r)
+	})
 }

@@ -306,8 +306,6 @@ func WithHttpEndpointOption(handler func() []*gHttp.GClusterHttpEndpointOption) 
 				app.HttpServer.Register(app.Manager, v)
 			}
 
-			app.HttpServer.Router.Handle("/", accessControl(http.NewServeMux()))
-
 			port := app.Config.(config.ServerConfiguration).GetServerConfig().Port
 
 			log.Printf("Start GCluster http server, successfully, work on port:%d", port)
@@ -315,20 +313,6 @@ func WithHttpEndpointOption(handler func() []*gHttp.GClusterHttpEndpointOption) 
 			return nil
 		},
 	}
-}
-
-func accessControl(h http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type")
-
-		if r.Method == "OPTIONS" {
-			return
-		}
-
-		h.ServeHTTP(w, r)
-	})
 }
 
 func WithCronOption(handler func(mgr manager.GClusterManager) []*gCron.GClusterCronOption) *RunOption {
